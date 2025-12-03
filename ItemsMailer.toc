@@ -1,0 +1,8 @@
+## Interface: 30300
+## Title: ItemsMailer
+## Notes: Auto sends configured items to a player when mail is opened.
+## Author: Cursor
+## Version: 1.0
+
+ItemsMailer.lua
+
