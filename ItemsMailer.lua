@@ -88,6 +88,7 @@ local function ProcessSending()
         -- Close mail window after a short delay to ensure mail is sent
         C_Timer.After(1, function() 
             CloseMail() 
+            Logout()
         end)
     else
         print("|cffff0000ItemsMailer:|r No matching items found in bags.")
