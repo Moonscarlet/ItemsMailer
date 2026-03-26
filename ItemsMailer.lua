@@ -1,137 +1,161 @@
 local addonName, ns = ...
 
 -- CONFIGURATION
-local RECIPIENT_NAME = "Lays" -- Replace with the recipient's name
+local RECIPIENT_NAME = "Lays"
 local WANTED_ITEMS = {
-    -- Add item IDs or Names here (one per line, comma separated)
-    -- "Runecloth",
     "Mooncloth",
     "Arcanite Bar",
     "Essence of Earth",
     "Essence of Water",
-    -- 2589, -- Example ID
 }
 -- END CONFIGURATION
 
 -- Item Parsing
+local cachedWantedItems = nil
 local function GetWantedItems()
-    local items = {}
+    if cachedWantedItems then return cachedWantedItems end
+    cachedWantedItems = {}
     for _, v in ipairs(WANTED_ITEMS) do
-        if type(v) == "number" then
-            items[v] = true
-        elseif type(v) == "string" then
-            items[string.lower(v)] = true
-        end
+        if type(v) == "number" then cachedWantedItems[v] = true
+        elseif type(v) == "string" then cachedWantedItems[string.lower(v)] = true end
     end
-    return items
+    return cachedWantedItems
 end
 
--- Check if we have any items to send
-local function HasItemsToSend()
+local function IsWantedItem(link)
+    if not link then return false end
+    local itemId = tonumber(link:match("item:(%d+)"))
+    if not itemId then return false end
     local wantedItems = GetWantedItems()
-    for bag = 0, 4 do
-        for slot = 1, GetContainerNumSlots(bag) do
-            local link = GetContainerItemLink(bag, slot)
-            if link then
-                local itemId = tonumber(link:match("item:(%d+)"))
-                local name = GetItemInfo(itemId)
-                
-                if wantedItems[itemId] then return true end
-                if name and wantedItems[string.lower(name)] then return true end
-            end
-        end
-    end
+    if wantedItems[itemId] then return true end
+    local name = GetItemInfo(itemId)
+    if name and wantedItems[string.lower(name)] then return true end
     return false
 end
 
--- Sending Logic
-local function ProcessSending()
-    if not RECIPIENT_NAME or RECIPIENT_NAME == "" then
-        print("|cffff0000ItemsMailer:|r Recipient not configured in Lua file.")
-        return
-    end
+-- ==========================================
+-- AUTOMATED BANK PROCESSING
+-- ==========================================
+local movedItemsList = {}
 
-    local wantedItems = GetWantedItems()
-    local count = 0
-    local sentItemsList = {}
-    
-    -- Iterate bags
-    for bag = 0, 4 do
-        for slot = 1, GetContainerNumSlots(bag) do
-            local link = GetContainerItemLink(bag, slot)
-            if link and count < 12 then
-                local itemId = tonumber(link:match("item:(%d+)"))
-                local name = GetItemInfo(itemId)
-                local _, _, _, _, _, _, _, _, countStack = GetContainerItemInfo(bag, slot)
-                
-                local match = false
-                if wantedItems[itemId] then match = true end
-                if name and wantedItems[string.lower(name)] then match = true end
-                
-                if match then
-                    -- UseContainerItem puts the item into the mail attachment slot if the Send Mail tab is open
-                    UseContainerItem(bag, slot)
-                    count = count + 1
-                    table.insert(sentItemsList, (countStack or 1) .. "x " .. (name or "Unknown"))
+local function RunBankLogic()
+    local isRecipient = (UnitName("player") == RECIPIENT_NAME)
+    local movedThisStep = false
+
+    if isRecipient then
+        -- WITHDRAW: Bank > Bags
+        for t = 1, GetNumGuildBankTabs() do
+            for sl = 1, 98 do
+                local link = GetGuildBankItemLink(t, sl)
+                if link and IsWantedItem(link) then
+                    local _, count = GetGuildBankItemInfo(t, sl)
+                    local name = GetItemInfo(link)
+                    for b = 0, 4 do
+                        for s = 1, GetContainerNumSlots(b) do
+                            if not GetContainerItemLink(b, s) then
+                                PickupGuildBankItem(t, sl)
+                                PickupContainerItem(b, s)
+                                table.insert(movedItemsList, (count or 1) .. "x " .. (name or "Item"))
+                                movedThisStep = true
+                                break
+                            end
+                        end
+                        if movedThisStep then break end
+                    end
                 end
+                if movedThisStep then break end
             end
+            if movedThisStep then break end
+        end
+    else
+        -- DEPOSIT: Bags > Bank
+        for b = 0, 4 do
+            for s = 1, GetContainerNumSlots(b) do
+                local link = GetContainerItemLink(b, s)
+                if link and IsWantedItem(link) then
+                    local _, count = GetContainerItemInfo(b, s)
+                    local name = GetItemInfo(link)
+                    for t = 1, GetNumGuildBankTabs() do
+                        for sl = 1, 98 do
+                            if not GetGuildBankItemInfo(t, sl) then
+                                PickupContainerItem(b, s)
+                                PickupGuildBankItem(t, sl)
+                                table.insert(movedItemsList, (count or 1) .. "x " .. (name or "Item"))
+                                movedThisStep = true
+                                break
+                            end
+                        end
+                        if movedThisStep then break end
+                    end
+                end
+                if movedThisStep then break end
+            end
+            if movedThisStep then break end
         end
     end
 
-    if count > 0 then
-        SendMail(RECIPIENT_NAME, "CDs", "")
-        print("|cff00ff00ItemsMailer:|r Sent " .. count .. " stacks to " .. RECIPIENT_NAME .. ":")
-        for _, itemStr in ipairs(sentItemsList) do
-            print("  - " .. itemStr)
-        end
-        
-        -- Close mail window after a short delay to ensure mail is sent
-        C_Timer.After(1, function() 
-            CloseMail() 
-            Logout()
-        end)
+    if movedThisStep then
+        C_Timer.After(0.2, RunBankLogic)
     else
-        print("|cffff0000ItemsMailer:|r No matching items found in bags.")
+        if #movedItemsList > 0 then
+            local action = isRecipient and "Withdrew" or "Deposited"
+            print("|cff00ff00ItemsMailer:|r " .. action .. " " .. #movedItemsList .. " items:")
+            for _, itemStr in ipairs(movedItemsList) do
+                print("  - " .. itemStr)
+            end
+            movedItemsList = {} -- Reset list
+        end
     end
+    C_Timer.After(0.5, function() 
+        Logout()
+        -- DEFAULT_CHAT_FRAME.editBox:SetText("/pct prepare") ChatEdit_SendText(DEFAULT_CHAT_FRAME.editBox, 0)
+    end)    
 end
 
--- Event Handling
+-- ==========================================
+-- EVENT HANDLING
+-- ==========================================
 local eventHandler = CreateFrame("Frame")
 eventHandler:RegisterEvent("MAIL_SHOW")
+eventHandler:RegisterEvent("GUILDBANKFRAME_OPENED")
 
-eventHandler:SetScript("OnEvent", function(self, event, arg1)
+eventHandler:SetScript("OnEvent", function(self, event)
     if event == "MAIL_SHOW" then
         if UnitName("player") == RECIPIENT_NAME then return end
-        if not HasItemsToSend() then return end
         
-        -- Delay to let mail frame init and switch tabs
-        local timer = CreateFrame("Frame")
-        timer:Hide()
-        timer.elapsed = 0
-        timer:SetScript("OnUpdate", function(self, elapsed)
-            self.elapsed = self.elapsed + elapsed
-            if self.elapsed >= 0.5 then
-                self:Hide()
-                
-                -- Switch to "Send Mail" tab (Tab 2)
-                if MailFrameTab2 then
-                    MailFrameTab2:Click()
-                end
-                
-                -- Another delay to process items after tab switch
-                local processTimer = CreateFrame("Frame")
-                processTimer:Hide()
-                processTimer.elapsed = 0
-                processTimer:SetScript("OnUpdate", function(subSelf, subElapsed)
-                    subSelf.elapsed = subSelf.elapsed + subElapsed
-                    if subSelf.elapsed >= 0.2 then
-                        subSelf:Hide()
-                        ProcessSending()
+        local hasItems = false
+        for b=0,4 do for s=1,GetContainerNumSlots(b) do if IsWantedItem(GetContainerItemLink(b,s)) then hasItems = true break end end end
+        
+        if hasItems then
+            C_Timer.After(0.5, function()
+                if MailFrameTab2 then MailFrameTab2:Click() end
+                C_Timer.After(0.2, function()
+                    local sentItemsList = {}
+                    local count = 0
+                    for b=0,4 do for s=1,GetContainerNumSlots(b) do
+                        if IsWantedItem(GetContainerItemLink(b,s)) and count < 12 then
+                            local name = GetItemInfo(GetContainerItemLink(b,s))
+                            local _, countStack = GetContainerItemInfo(b,s)
+                            UseContainerItem(b,s)
+                            count = count + 1
+                            table.insert(sentItemsList, (countStack or 1) .. "x " .. (name or "Unknown"))
+                        end
+                    end end
+                    if count > 0 then
+                        SendMail(RECIPIENT_NAME, "CDs", "")
+                        print("|cff00ff00ItemsMailer:|r Sent " .. count .. " stacks to " .. RECIPIENT_NAME .. ":")
+                        for _, itemStr in ipairs(sentItemsList) do print("  - " .. itemStr) end
+                        C_Timer.After(1, function() 
+                            Logout()
+                            DEFAULT_CHAT_FRAME.editBox:SetText("/pct prepare") ChatEdit_SendText(DEFAULT_CHAT_FRAME.editBox, 0)
+                        end)
                     end
                 end)
-                processTimer:Show()
-            end
-        end)
-        timer:Show()
+            end)
+        end
+
+    elseif event == "GUILDBANKFRAME_OPENED" then
+        movedItemsList = {}
+        C_Timer.After(0.5, RunBankLogic)
     end
 end)
