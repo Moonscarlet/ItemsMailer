@@ -107,7 +107,7 @@ local function RunBankLogic()
         end
     end
     C_Timer.After(0.5, function() 
-        Logout()
+        -- Logout()
         -- DEFAULT_CHAT_FRAME.editBox:SetText("/pct prepare") ChatEdit_SendText(DEFAULT_CHAT_FRAME.editBox, 0)
     end)    
 end
