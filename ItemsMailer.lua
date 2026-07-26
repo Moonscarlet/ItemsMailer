@@ -147,7 +147,7 @@ eventHandler:SetScript("OnEvent", function(self, event)
                         for _, itemStr in ipairs(sentItemsList) do print("  - " .. itemStr) end
                         C_Timer.After(1, function() 
                             Logout()
-                            DEFAULT_CHAT_FRAME.editBox:SetText("/pct prepare") ChatEdit_SendText(DEFAULT_CHAT_FRAME.editBox, 0)
+                            -- DEFAULT_CHAT_FRAME.editBox:SetText("/pct prepare") ChatEdit_SendText(DEFAULT_CHAT_FRAME.editBox, 0)
                         end)
                     end
                 end)
